@@ -49,7 +49,7 @@ class PcapDeviceManager:
         description, addresses, self.devices_name = self.iter_parse(self.devices, ["description", "addresses", "name"])
         for id, (des, ip) in enumerate(zip(description, addresses)):
             ip_address = self.get_one_ip_from_pcap_addr(ip)
-            devices_info.append((id + 1, des.decode(), ip_address))
+            devices_info.append((id, des.decode(), ip_address))
         self.find_all_devices()
         return devices_info
     

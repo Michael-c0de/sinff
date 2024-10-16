@@ -1,6 +1,6 @@
 import sys
 import threading
-from queue import Queue
+from collections import deque
 from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
 from PyQt5.QtCore import pyqtSignal, QObject
 import libpcap as pcap
@@ -12,15 +12,13 @@ import time
 
 class PacketCaptureThread(threading.Thread):
     """抓包线程"""
-    def __init__(self, packet_queue, stop_event, dev, bpf_exp='tcp'):
+    def __init__(self, packet_queue:deque, dev, bpf_exp='udp'):
         super().__init__()
         self.packet_queue = packet_queue
-        self.stop_event = stop_event
         self.dev = dev
         self.bpf_exp = bpf_exp
         self.handle = None
         self.setDaemon(True)
-
 
     def set_bpf_filter(self):
         """设置 BPF 过滤器"""
@@ -49,46 +47,44 @@ class PacketCaptureThread(threading.Thread):
         if result != pcap.PCAP_ERROR_BREAK :
             print(f"pcap loop exit: {result}")
         pcap.close(self.handle)
-        print("PacketCaptureThread结束")
+        print("PacketCaptureThread end")
     
     def packet_handler(self, user, pkthdr, packet):
-        if not self.stop_event.is_set():
-            """处理抓到的包，放入队列"""
-            raw_data = bytes(packet[:pkthdr.contents.caplen])
-            if not self.packet_queue.full():
-                self.packet_queue.put(raw_data)  # 将原始数据包放入队列
-        else:
-            self.stop()
+        """处理抓到的包，放入队列"""
+        raw_data = bytes(packet[:pkthdr.contents.caplen])
+        if len(self.packet_queue) < self.packet_queue.maxlen:
+            self.packet_queue.append(raw_data)  # 将原始数据包放入队列
     def stop(self):
         if self.handle:
             pcap.breakloop(self.handle)
-        # self.stop_event.set()
 
 class PacketAnalysisThread(threading.Thread):
     """数据分析线程"""
-    def __init__(self, packet_queue, result_queue, stop_event):
+    def __init__(self, packet_queue:deque, result_queue:deque, stop_event):
         super().__init__()
         self.packet_queue = packet_queue
         self.result_queue = result_queue
         self.stop_event = stop_event
+        self.count = 0
 
     def run(self):
         """线程运行函数，处理数据包并进行分析"""
         while not self.stop_event.is_set():
             try:
-                packet_data = self.packet_queue.get(timeout=1)
+                packet_data = self.packet_queue.pop()
                 # 解析数据包
                 frame = Ether(packet_data)
                 # 数据分析（此处为示例，实际逻辑可以更复杂）
                 result = f"Packet Summary: {frame.summary()}"
-                self.result_queue.put(result)  # 将分析结果放入结果队列
+                print(f"#{self.count}, {result}")
+                self.count+=1
+                self.result_queue.append(result)  # 将分析结果放入结果队列
             except Exception as e:
                 continue
         self.stop()
     def stop(self):
         """停止分析"""
-        print("PacketAnalysisThread stop")
-        # self.stop_event.set()
+        print("PacketAnalysisThread end")
 
 class SignalManager(QObject):
     """信号管理类，用于子线程和主线程通信"""
@@ -96,7 +92,7 @@ class SignalManager(QObject):
 
 class MainWindow(QMainWindow):
     """Qt主窗口，用于数据呈现和用户交互"""
-    def __init__(self, result_queue, signal_manager, stop_event):
+    def __init__(self, result_queue:deque, signal_manager, stop_event):
         super().__init__()
         self.result_queue = result_queue
         self.signal_manager = signal_manager
@@ -128,8 +124,8 @@ class MainWindow(QMainWindow):
     def poll_results(self):
         if not self.stop_event.is_set():
             try:
-                while not self.result_queue.empty():
-                    result = self.result_queue.get()
+                while len(self.result_queue)!=0:
+                    result = self.result_queue.pop()
                     self.signal_manager.result_signal.emit(result)
             except Exception as e:
                 print(f"poll_results err {e}")
@@ -154,8 +150,8 @@ def select_device():
 def main():
     dev = select_device()
     # 创建队列和线程停止事件
-    packet_queue = Queue(maxsize=10000)
-    result_queue = Queue(maxsize=10000)
+    packet_queue = deque(maxlen=1000000)
+    result_queue = deque(maxlen=1000000)
     stop_event = threading.Event()
 
     # 创建信号管理器
@@ -167,7 +163,7 @@ def main():
     main_window.show()
 
     # 创建抓包线程和数据分析线程
-    capture_thread = PacketCaptureThread(packet_queue, stop_event, dev, "")
+    capture_thread = PacketCaptureThread(packet_queue, dev, "udp")
     analysis_thread = PacketAnalysisThread(packet_queue, result_queue, stop_event)
 
     # 启动线程
@@ -176,7 +172,8 @@ def main():
 
     # 启动应用
     app.exec_()
-    
+    capture_thread.stop()
+    analysis_thread.stop()
 
     # 停止线程
     stop_event.set()
