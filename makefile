@@ -9,7 +9,7 @@ OUT = main.exe
 # 编译器和编译选项
 CC = gcc
 CFLAGS = -I"$(NPCAP_PATH)/include" -Wall
-LDFLAGS = -L"$(NPCAP_PATH)/lib" -lwpcap -lws2_32
+LDFLAGS = -L"$(NPCAP_PATH)/lib/x64" -lwpcap -lws2_32
 
 # 默认目标
 all: $(OUT)

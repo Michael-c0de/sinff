@@ -12,7 +12,7 @@ from PyQt5.QtCore import pyqtSlot, QTimer
 
 class PacketCaptureThread(threading.Thread):
     """抓包线程"""
-    def __init__(self, packet_queue:deque, dev, stop_event:threading.Event, bpf_exp='udp', max_count=0):
+    def __init__(self, packet_queue:deque, dev, stop_event:threading.Event, bpf_exp='udp', max_count=4096):
         super().__init__()
         self.packet_queue = packet_queue
         self.dev = dev
@@ -20,8 +20,7 @@ class PacketCaptureThread(threading.Thread):
         self.bpf_exp = bpf_exp
         self.handle = None
         self.max_count = max_count
-        self.setDaemon(True)
-
+        self.ts0 = None
     def set_bpf_filter(self):
         """设置 BPF 过滤器"""
         fp = pcap.bpf_program()
@@ -50,11 +49,16 @@ class PacketCaptureThread(threading.Thread):
             print(f"pcap loop exit: {result}")
         self.stop()
     
-    def packet_handler(self, user, pkthdr, packet):
+    def packet_handler(self, _, pkthdr, packet):
         """处理抓到的包，放入队列"""
         raw_data = bytes(packet[:pkthdr.contents.caplen])
+        _ts = pkthdr.contents.ts
+        ts = _ts.tv_sec + (_ts.tv_usec/1000000)
+        if self.ts0 == None:
+            self.ts0 = ts
+        ts = ts - self.ts0
         if len(self.packet_queue) < self.packet_queue.maxlen:
-            self.packet_queue.append(raw_data)  # 将原始数据包放入队列
+            self.packet_queue.appendleft((ts, raw_data))  # 将原始数据包放入队列
     
     def stop(self):
         if self.handle:
@@ -72,20 +76,24 @@ class PacketAnalysisThread(threading.Thread):
         self.packet_queue = packet_queue
         self.result_queue = result_queue
         self.stop_event = stop_event
-        self.count = 0
 
     def run(self):
         """线程运行函数，处理数据包并进行分析"""
         while not self.stop_event.is_set() or len(self.packet_queue)!=0:
             try:
-                packet_data = self.packet_queue.pop()
+                ts, packet_data = self.packet_queue.pop()
                 # 解析数据包
                 frame = Ether(packet_data)
                 # 数据分析（此处为示例，实际逻辑可以更复杂）
-                result = f"Packet Summary: {frame.summary()}"
-                print(f"#{self.count}, {result}")
-                self.count+=1
-                self.result_queue.append(result)  # 将分析结果放入结果队列
+                result = {
+                    "ts":f"{ts:.6}",
+                    "src1":frame.src,
+                    "dst1":frame.dst,
+                    "src2":frame.payload.src,
+                    "dst2":frame.payload.dst,
+                    "info":frame.summary()
+                }
+                self.result_queue.appendleft(result)  # 将分析结果放入结果队列
             except Exception as e:
                 continue
         self.stop()
@@ -110,8 +118,8 @@ class MainWindow(QMainWindow):
 
         # 设置主部件为一个表格，用于显示抓包信息
         self.table = QTableWidget(self)
-        self.table.setColumnCount(1)
-        self.table.setHorizontalHeaderLabels(["INFO"])
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["ts", "src1", "dst1", "src2", "dst2", "info"])
         # 设置列宽自适应内容
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -126,17 +134,43 @@ class MainWindow(QMainWindow):
         # 定时器定时刷新抓包数据
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_table)
-        self.timer.start(1000)  # 每秒刷新一次
-
+        # 控制刷新速率，每秒200条
+        self.timer.start(2000)  # 每秒刷新一次
+        self.batch_size = 200
 
     @pyqtSlot()
     def update_table(self):
         """定时刷新抓包数据"""
-        while len(self.result_queue)!=0:
-            result = self.result_queue.pop()
-            row_count = self.table.rowCount()
-            self.table.insertRow(row_count)
-            self.table.setItem(row_count, 0, QTableWidgetItem(result))
+        rows_to_insert = []
+        while len(self.result_queue) > 0 and len(rows_to_insert) < self.batch_size:
+            item = self.result_queue.pop()
+            rows_to_insert.append(item)
+
+        # 批量插入数据到表格，减少频繁的UI更新
+        if rows_to_insert:
+            self.table.setUpdatesEnabled(False)  # 暂停UI更新，提升性能
+            for item in rows_to_insert:
+                row_count = self.table.rowCount()
+                self.table.insertRow(row_count)
+                self.table.setItem(row_count, 0, QTableWidgetItem(item['ts']))
+                self.table.setItem(row_count, 1, QTableWidgetItem(item['src1']))
+                self.table.setItem(row_count, 2, QTableWidgetItem(item['dst1']))
+                self.table.setItem(row_count, 3, QTableWidgetItem(item['src2']))
+                self.table.setItem(row_count, 4, QTableWidgetItem(item['dst2']))
+                self.table.setItem(row_count, 5, QTableWidgetItem(item['info']))
+
+            self.table.setUpdatesEnabled(True)  # 重新启用UI更新
+            self.table.scrollToBottom()  # 保持滚动条在底部
+
+    # @pyqtSlot()
+    # def update_table(self):
+    #     """定时刷新抓包数据"""
+    #     while len(self.result_queue)!=0:
+    #         ts, result = self.result_queue.pop()
+    #         row_count = self.table.rowCount()
+    #         self.table.insertRow(row_count)
+    #         self.table.setItem(row_count, 0, QTableWidgetItem(ts))
+    #         self.table.setItem(row_count, 1, QTableWidgetItem(result))
 
 
 

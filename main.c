@@ -177,6 +177,7 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 {
     // printf("#%d\n", count++);
     // count++;
+    printf("%d-%d", header->ts.tv_sec);
     memcpy(buf, pkt_data, header->caplen);
     
 }
