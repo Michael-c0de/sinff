@@ -7,15 +7,12 @@ import libpcap as pcap
 import ctypes as ct
 from scapy.all import Ether
 from device_mm import PcapDeviceManager
-import sched
-import time
-from queue import Queue
 from PyQt5.QtCore import pyqtSlot, QTimer
 
 
 class PacketCaptureThread(threading.Thread):
     """抓包线程"""
-    def __init__(self, packet_queue:deque, dev, stop_event:threading.Event, bpf_exp='udp', max_count=1000):
+    def __init__(self, packet_queue:deque, dev, stop_event:threading.Event, bpf_exp='udp', max_count=0):
         super().__init__()
         self.packet_queue = packet_queue
         self.dev = dev
@@ -70,7 +67,7 @@ class PacketCaptureThread(threading.Thread):
 
 class PacketAnalysisThread(threading.Thread):
     """数据分析线程"""
-    def __init__(self, packet_queue:deque, result_queue:Queue, stop_event:threading.Event):
+    def __init__(self, packet_queue:deque, result_queue:deque, stop_event:threading.Event):
         super().__init__()
         self.packet_queue = packet_queue
         self.result_queue = result_queue
@@ -88,7 +85,7 @@ class PacketAnalysisThread(threading.Thread):
                 result = f"Packet Summary: {frame.summary()}"
                 print(f"#{self.count}, {result}")
                 self.count+=1
-                self.result_queue.put(result)  # 将分析结果放入结果队列
+                self.result_queue.append(result)  # 将分析结果放入结果队列
             except Exception as e:
                 continue
         self.stop()
@@ -104,7 +101,7 @@ class SignalManager(QObject):
 
 class MainWindow(QMainWindow):
     """Qt主窗口，用于数据呈现和用户交互"""
-    def __init__(self, result_queue:Queue):
+    def __init__(self, result_queue:deque):
         super().__init__()
         self.result_queue = result_queue
         # 初始化UI
@@ -135,8 +132,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def update_table(self):
         """定时刷新抓包数据"""
-        while not self.result_queue.empty():
-            result = self.result_queue.get()
+        while len(self.result_queue)!=0:
+            result = self.result_queue.pop()
             row_count = self.table.rowCount()
             self.table.insertRow(row_count)
             self.table.setItem(row_count, 0, QTableWidgetItem(result))
@@ -163,7 +160,7 @@ def main():
     dev = select_device()
     # 创建队列和线程停止事件
     packet_queue = deque(maxlen=1000000)
-    result_queue = Queue(maxsize=1000000)
+    result_queue = deque(maxlen=1000000)
     stop_event = threading.Event()
 
     # 初始化 Qt 应用
@@ -172,7 +169,7 @@ def main():
     main_window.show()
 
     # 创建抓包线程和数据分析线程
-    capture_thread = PacketCaptureThread(packet_queue, dev, stop_event, "udp")
+    capture_thread = PacketCaptureThread(packet_queue, dev, stop_event, "")
     analysis_thread = PacketAnalysisThread(packet_queue, result_queue, stop_event)
 
     # 启动线程
