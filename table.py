@@ -54,14 +54,12 @@ class MyTableModel(QAbstractTableModel):
 
 
 class DynamicTable(QWidget):
-    def __init__(self, data_queue:Queue):
+    def __init__(self, item_list:list, table_model:MyTableModel):
         super().__init__()
-        self.data_queue = data_queue  # 获取队列对象
-        self.initial_data = []
-        headers = ["ts", "src1", "dst1", "src2", "dst2", "info"]
-        self.model = MyTableModel([], headers)
-
-        
+        self.item_list = item_list  # 已经分析的数据包信息
+        self.model = table_model
+        # 已经渲染了self.offset个数据包
+        self.offset = 0
         # 创建QTableView并设置模型
         self.table_view = QTableView()
         self.table_view.setModel(self.model)
@@ -69,8 +67,6 @@ class DynamicTable(QWidget):
         # 设置列宽自适应内容
         header = self.table_view.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-
-
 
         # 垂直布局
         layout = QVBoxLayout()
@@ -83,18 +79,28 @@ class DynamicTable(QWidget):
         self.update_timer.timeout.connect(self.update_table)
         self.update_timer.start()
 
-    
     def update_table(self):
         """定期检查数据队列并更新表格"""
-        new_rows = []
-        if not self.data_queue.empty():
+        new_offset = len(self.item_list)
+        if new_offset > self.offset:
             self.table_view.setUpdatesEnabled(False)
-            items = self.data_queue.qsize()
-            for _ in range(items):
-                new_rows.append(self.data_queue.get())  # 从队列中获取数据
-            self.model.addRows(new_rows)  # 更新模型
+            self.model.addRows(self.item_list[self.offset:])  # 更新模型
             self.table_view.setUpdatesEnabled(True)
+            logger.debug(f"update {new_offset - self.offset} packets end")
+            self.offset = new_offset
             # self.table_view.scrollToBottom()  # 滚动到表格底部
+
+    # def update_table(self):
+    #     """定期检查数据队列并更新表格"""
+    #     new_rows = []
+    #     if not self.data_queue.empty():
+    #         self.table_view.setUpdatesEnabled(False)
+    #         items = self.data_queue.qsize()
+    #         for _ in range(items):
+    #             new_rows.append(self.data_queue.get())  # 从队列中获取数据
+    #         self.model.addRows(new_rows)  # 更新模型
+    #         self.table_view.setUpdatesEnabled(True)
+    #         # self.table_view.scrollToBottom()  # 滚动到表格底部
 
 
 class MainWindow(QMainWindow):
