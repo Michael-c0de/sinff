@@ -7,6 +7,10 @@ from device_mm import PcapDeviceManager
 from logger import  logger
 import time
 from util import copy_packet_pointer, copy_pkthdr_pointer
+
+# import cProfile
+# cProfile.run('PacketAnalysisThread.run()')
+
 class PacketCaptureThread(threading.Thread):
     """抓包线程"""
     def __init__(self, packet_queue:Queue, handle ,max_count=4096):
@@ -35,7 +39,7 @@ class PacketCaptureThread(threading.Thread):
             logger.info(f"pcap loop exit: {result}")
         self.packet_queue.put(("end","end"))
         logger.info(f"PacketCapture Thread#{threading.get_ident()} end")
-        logger.info(f"Captured {self.max_count} packets in {end_time - start_time:.2f} seconds")
+        logger.info(f"Captured {self.count} packets in {end_time - start_time:.2f} seconds")
         
 
     def packet_handler(self, _,  _pkthdr, _packet):
@@ -52,7 +56,7 @@ class PacketCaptureThread(threading.Thread):
         pkthdr = copy_pkthdr_pointer(_pkthdr)
         packet = copy_packet_pointer(_packet, caplen)
         # logger.info(f"#{self.count}, {caplen}")
-        # self.count+=1
+        self.count+=1
         # pcap.dump(self.out_pcap, pkthdr, packet)
         # pcap.dump_flush(args)
         # self.packet_queue()
@@ -69,9 +73,6 @@ class PacketCaptureThread(threading.Thread):
     
     def stop(self):
         pcap.breakloop(self.handle)
-        # pcap.dump_flush(self.out_dt)
-        # pcap.dump_close(self.out_dt)
-        # self.stop_event.set()
 
 from queue import Queue
 class PacketAnalysisThread(threading.Thread):
@@ -79,13 +80,12 @@ class PacketAnalysisThread(threading.Thread):
     数据分析线程
     pcap_out:ct.POINTER(ct.c_ubyte)
     """
-    def __init__(self, packet_queue:Queue, table_items:Queue, stop_event:threading.Event, pcap_out_dt):
+    def __init__(self, packet_queue:Queue, table_items:Queue, pcap_out_dt):
         super().__init__()
         # 入队
         self.packet_queue = packet_queue
         # 出队
         self.table_items = table_items
-        self.stop_event = stop_event
 
         self.out_dt = pcap_out_dt
         self.out_ub = ct.cast(self.out_dt, ct.POINTER(ct.c_ubyte))
@@ -128,7 +128,7 @@ class PacketAnalysisThread(threading.Thread):
         pcap.dump_close(self.out_dt)
         
 
-from queue import Queue
+
 class PacketDataView():
     """数据查询接口"""
     def __init__(self, dev, item_queue:Queue, bpf_exp, max_count = 0, tmpfile="tmp.pcap"):
@@ -147,6 +147,8 @@ class PacketDataView():
         self.out_dt = pcap.dump_open(self.handle, ct.c_char_p(tmpfile.encode()))
         self.out_ub = ct.cast(self.out_dt, ct.POINTER(ct.c_ubyte))
         self.set_bpf_filter()
+        
+
 
     def set_bpf_filter(self):
         """设置 BPF 过滤器"""
@@ -163,20 +165,18 @@ class PacketDataView():
 
         self._stop_event = threading.Event()
         self._capture_thread = PacketCaptureThread(self._packet_queue, self.handle, self.max_count)
-        self._analysis_thread = PacketAnalysisThread(self._packet_queue, self.table_items, self._stop_event, self.out_dt)
+        self._analysis_thread = PacketAnalysisThread(self._packet_queue, self.table_items, self.out_dt)
         self._capture_thread.start()
         self._analysis_thread.start()
 
     def close_capture(self):
-        self._capture_thread.stop()
-        pcap.close(self.handle)
-        
+        self._capture_thread.stop()        
         # 数据分析线程不必阻塞
-        self._stop_event.set()
         self._analysis_thread.stop()
         self._capture_thread.join()
         self._analysis_thread.join()
-        
+        pcap.close(self.handle)
+
 
     def get_new_list(self):
         data = self.table_items[self.last_index:]
