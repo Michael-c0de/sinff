@@ -1,9 +1,12 @@
-from scapy.all import rdpcap, Ether, IP, TCP, UDP
+import libpcap as pcap
+import ctypes as ct
+import os
+errbuf = ct.create_string_buffer(pcap.PCAP_ERRBUF_SIZE + 1)
+PATH = b"tmp.pcap"
+filename = ct.c_char_p(PATH)
+handle = pcap.open_offline(filename, errbuf)
 
-# 读取 .pcap 文件
-packets = rdpcap('data.pcap')
-
-# 遍历并解析每个数据包
-for pkt in packets:
-    pkt.summary()
-    break
+while True:
+    res = os.stat(PATH)
+    print(res.st_size)
+    

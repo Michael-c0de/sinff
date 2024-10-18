@@ -5,7 +5,10 @@ from PyQt5.QtWidgets import QApplication, QTableView, QVBoxLayout, QWidget, QMai
 from multiprocessing import Process, Queue
 from sniffer import PacketDataView, select_device
 from logger import logging, logger
-logger.setLevel(logging.INFO)
+from PyQt5.QtWidgets import QHeaderView
+
+logger.setLevel(logging.DEBUG)
+
 class MyTableModel(QAbstractTableModel):
     def __init__(self, data, headers):
         super().__init__()
@@ -49,24 +52,6 @@ class MyTableModel(QAbstractTableModel):
         self.endInsertRows()
 
 
-# class DataThread(QThread):
-#     new_data_signal = pyqtSignal(list)
-
-#     def __init__(self, data_view: PacketDataView, data_queue: Queue):
-#         super().__init__()
-#         self.data_view = data_view
-#         self.data_queue = data_queue  # 用于通信
-
-#     def run(self):
-#         while True:
-#             new_data = self.data_view.get_new_list()
-#             if new_data:
-#                 self.data_queue.put(new_data)  # 通过队列发送数据到UI进程
-#             self.sleep(2)  # 休眠2秒，减少资源占用
-
-
-
-
 class DynamicTable(QWidget):
     def __init__(self, data_queue:Queue):
         super().__init__()
@@ -75,9 +60,14 @@ class DynamicTable(QWidget):
         headers = ["ts", "src1", "dst1", "src2", "dst2", "info"]
         self.model = MyTableModel([], headers)
 
+        
         # 创建QTableView并设置模型
         self.table_view = QTableView()
         self.table_view.setModel(self.model)
+        
+        # 设置列宽自适应内容
+        header = self.table_view.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
         # 布局
         layout = QVBoxLayout()
@@ -102,20 +92,20 @@ class DynamicTable(QWidget):
             # self.table_view.scrollToBottom()  # 滚动到表格底部
 
 
-# class MainWindow(QMainWindow):
-#     """Qt主窗口，用于数据呈现和用户交互"""
-#     def __init__(self, table: DynamicTable):
-#         super().__init__()
-#         self.setWindowTitle("Packet Sniffer")
-#         self.setGeometry(100, 100, 800, 400)
-#         self.setCentralWidget(table)
+class MainWindow(QMainWindow):
+    """Qt主窗口，用于数据呈现和用户交互"""
+    def __init__(self, table: DynamicTable):
+        super().__init__()
+        self.setWindowTitle("Packet Sniffer")
+        self.setGeometry(100, 100, 800, 400)
+        self.setCentralWidget(table)
 
 
 import time
 import os
 def data_process(item_queue:Queue, message:Queue, dev, bpf):
     # 启动抓包和数据更新
-    data_view = PacketDataView(dev, item_queue, bpf)
+    data_view = PacketDataView(dev, item_queue, bpf, 4096)
     data_view.start_capture()
     # 保持子进程运行直到主进程发出停止信号
     while True:
@@ -135,7 +125,7 @@ def  test():
     item_queue = Queue()  # 创建进程间通信的队列
     message = Queue()  # 创建进程间通信的队列
 
-    p = Process(target=data_process, args=(item_queue, message, dev, ""))
+    p = Process(target=data_process, args=(item_queue, message, dev, "udp"))
     p.daemon = True
     p.start()
     
@@ -162,7 +152,8 @@ if __name__ == '__main__':
 
     # 启动Qt应用
     app = QApplication(sys.argv)
-    window = DynamicTable(item_queue)
+    dynamicTable = DynamicTable(item_queue)
+    window = MainWindow(dynamicTable)
     window.show()
 
     app.exec_()
