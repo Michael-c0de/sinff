@@ -70,7 +70,8 @@ class PacketCaptureThread(threading.Thread):
         # ts = ts - self.ts0
         # if len(self.packet_queue) < self.packet_queue.maxlen:
         self.packet_queue.put((pkthdr, packet))  # 将原始数据包放入队列
-    
+        # logger.debug(f"PacketCapture {pkthdr[0].caplen}")
+
     def stop(self):
         pcap.breakloop(self.handle)
 
@@ -80,18 +81,18 @@ class PacketAnalysisThread(threading.Thread):
     数据分析线程
     pcap_out:ct.POINTER(ct.c_ubyte)
     """
-    def __init__(self, packet_queue:Queue, table_items:Queue, pcap_out_dt):
+    def __init__(self, packet_queue:Queue, frame_items:Queue, pcap_out_dt):
         super().__init__()
         # 入队
         self.packet_queue = packet_queue
         # 出队
-        self.table_items = table_items
+        self.frame_items = frame_items
 
         self.out_dt = pcap_out_dt
         self.out_ub = ct.cast(self.out_dt, ct.POINTER(ct.c_ubyte))
-
+        self.ts = None
         self.setDaemon(True)
-
+        
     def run(self):
         logger.info(f"PacketAnalysis Thread#{threading.get_ident()} run")
         """线程运行函数，处理数据包并进行分析"""
@@ -99,31 +100,30 @@ class PacketAnalysisThread(threading.Thread):
             try:
                 pkthdr, packet = self.packet_queue.get()
                 if(pkthdr=="end"):
+                    print("a"*1000)
                     break
                 # 解析数据包
+                # logger.debug(f"PacketAnalysis {pkthdr[0].caplen}")
                 # print(pkthdr[0].caplen)
                 frame = Ether(bytes(packet[:pkthdr[0].caplen]))
-                # 数据分析
-                result = {
-                    "ts": "0",
-                    "src1":frame.src,
-                    "dst1":frame.dst,
-                    "src2":frame.payload.src,
-                    "dst2":frame.payload.dst,
-                    "info":frame.summary(),
-                }
                 # 记录到磁盘
                 pcap.dump(self.out_ub, pkthdr, packet)
-                self.table_items.put(result)
+                # 计算时间戳
+                pk_ts = pkthdr[0].ts.tv_sec + pkthdr[0].ts.tv_usec/1000000
+                if self.ts is None:
+                    self.ts = pk_ts
+                pk_ts -= self.ts
+                self.frame_items.put((pk_ts, frame))
             except Exception as e:
                 logger.warning(e)
                 continue
         self.stop()
-        logger.info(f"PacketAnalysis Thread#{threading.get_ident()} end")
+        # logger.info(f"PacketAnalysis Thread#{threading.get_ident()} end")
         
 
     def stop(self):
         """停止分析"""
+        
         pcap.dump_flush(self.out_dt)
         pcap.dump_close(self.out_dt)
         
@@ -172,7 +172,7 @@ class PacketDataView():
     def close_capture(self):
         self._capture_thread.stop()        
         # 数据分析线程不必阻塞
-        self._analysis_thread.stop()
+        # self._analysis_thread.stop()
         self._capture_thread.join()
         self._analysis_thread.join()
         pcap.close(self.handle)

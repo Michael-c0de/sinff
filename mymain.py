@@ -8,6 +8,9 @@ from table import data_process, DynamicTable, MyTableModel
 from sniffer import select_device
 from multiprocessing import Process, Queue
 from logger import logging, logger
+from scapy.all import Packet, raw
+from util import hexdump_bytes
+import tree
 logger.setLevel(logging.DEBUG)
 
 class Ui_Form(object):
@@ -29,7 +32,7 @@ class Ui_Form(object):
         self.splitter.setOrientation(QtCore.Qt.Horizontal)
         self.splitter.setObjectName("splitter")
 
-        self.textBrowser = QtWidgets.QTextBrowser(self.splitter)
+        self.textBrowser = tree.DictTree(self.splitter)
         self.textBrowser.setObjectName("textBrowser")
         self.textBrowser.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
@@ -66,7 +69,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabe_model = MyTableModel([], self.headers)
         self.dynamic_table = DynamicTable(item_list, self.tabe_model)
 
+        self.dynamic_table.table_view.clicked.connect(self.click_item_event)
 
+    def set_data(self, packet:Packet):
+        display = {}
+        p = packet
+        while p:
+            display[p.name] = p.fields
+            p = p.payload
+        self.ui.textBrowser.update_dict((display))
+
+    def set_raw_data(self, packet:Packet):
+        self.ui.textBrowser_2.setText(hexdump_bytes(raw(packet)))
+    
     def __init__(self, sync_queue:Queue):
         super().__init__()
         self.item_list = []
@@ -116,7 +131,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # Additional edit actions can be added here
         # Example: edit_action = QtWidgets.QAction("Edit Item", self)
         # edit_menu.addAction(edit_action)
+    def click_item_event(self, Item=None):
+        # 如果单元格对象为空
+        if Item is None:
+            return
+        row = Item.row()  # 获取行数
+        packet = self.item_list[row][1]
+        self.set_data(packet)
+        self.set_raw_data(packet)
 
+    
 # def main():
 #     app = QtWidgets.QApplication(sys.argv)
 #     Form = QtWidgets.QWidget()

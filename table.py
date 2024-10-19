@@ -38,15 +38,16 @@ class MyTableModel(QAbstractTableModel):
         end_row = start_row + len(new_rows) - 1      
         self.beginInsertRows(self.index(0, 0).parent(), start_row, end_row)
 
+
         # 将字典转换为列表，每个字典项按顺序转换为列表的一行
-        for row in new_rows:
+        for ts, packet in new_rows:
             row_data = [
-                row["ts"],    # 从字典提取出各列数据
-                row["src1"],
-                row["dst1"],
-                row["src2"],
-                row["dst2"],
-                row["info"]
+                ts,
+                packet.src if hasattr(packet, "src") else None,
+                packet.dst if hasattr(packet, "dst") else None,
+                packet.payload.src if hasattr(packet.payload, "src") else None,
+                packet.payload.dst if hasattr(packet.payload, "dst") else None,
+                packet.summary()
             ]
             self._data.append(row_data)  # 将转换后的行数据添加到模型的数据中
 
@@ -90,17 +91,7 @@ class DynamicTable(QWidget):
             self.offset = new_offset
             # self.table_view.scrollToBottom()  # 滚动到表格底部
 
-    # def update_table(self):
-    #     """定期检查数据队列并更新表格"""
-    #     new_rows = []
-    #     if not self.data_queue.empty():
-    #         self.table_view.setUpdatesEnabled(False)
-    #         items = self.data_queue.qsize()
-    #         for _ in range(items):
-    #             new_rows.append(self.data_queue.get())  # 从队列中获取数据
-    #         self.model.addRows(new_rows)  # 更新模型
-    #         self.table_view.setUpdatesEnabled(True)
-    #         # self.table_view.scrollToBottom()  # 滚动到表格底部
+
 
 
 class MainWindow(QMainWindow):

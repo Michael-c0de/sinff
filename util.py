@@ -13,3 +13,13 @@ def copy_packet_pointer(_packet, length):
     new_packet = (ct.c_ubyte * length)()  # 创建新的数组
     ct.memmove(new_packet, _packet, length)  # 深拷贝原始数据
     return ct.cast(new_packet, ct.POINTER(ct.c_ubyte))  # 返回新的指针
+
+
+def hexdump_bytes(data):
+    result = []
+    for i in range(0, len(data), 16):
+        chunk = data[i:i+16]
+        hex_part = ' '.join(f"{byte:02x}" for byte in chunk)
+        ascii_part = ''.join(chr(byte) if 32 <= byte <= 126 else '.' for byte in chunk)
+        result.append(f"{i:08x}  {hex_part:<47}  {ascii_part}")
+    return '\n'.join(result)
