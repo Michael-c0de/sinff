@@ -9,7 +9,6 @@ class DictTree(QWidget):
         self.tree_view = QTreeView()
         self.model = QStandardItemModel()
         
-        # self.model.setHorizontalHeaderLabels(['item', 'Value'])
         self.tree_view.setModel(self.model)
         self.tree_view.header().hide()
         layout = QVBoxLayout()

@@ -8,8 +8,8 @@ from table import data_process, DynamicTable, MyTableModel
 from sniffer import select_device
 from multiprocessing import Process, Queue
 from logger import logging, logger
-from scapy.all import Packet, raw
-from util import hexdump_bytes
+from scapy.all import Packet, raw, Ether
+from util import hexdump_bytes, packet2dict
 import tree
 logger.setLevel(logging.DEBUG)
 
@@ -65,22 +65,17 @@ class Ui_Form(object):
 class MainWindow(QtWidgets.QMainWindow):
 
     def set_dynamic_table(self, item_list):
-        self.headers = ["ts", "src1", "dst1", "src2", "dst2", "info"]
+        self.headers = ["count", "ts", "src1", "dst1", "src2", "dst2", "info"]
         self.tabe_model = MyTableModel([], self.headers)
         self.dynamic_table = DynamicTable(item_list, self.tabe_model)
 
         self.dynamic_table.table_view.clicked.connect(self.click_item_event)
 
     def set_data(self, packet:Packet):
-        display = {}
-        p = packet
-        while p:
-            display[p.name] = p.fields
-            p = p.payload
-        self.ui.textBrowser.update_dict((display))
+        self.ui.textBrowser.update_dict(packet2dict(packet))
 
-    def set_raw_data(self, packet:Packet):
-        self.ui.textBrowser_2.setText(hexdump_bytes(raw(packet)))
+    def set_raw_data(self, packet:bytes):
+        self.ui.textBrowser_2.setText(hexdump_bytes(packet))
     
     def __init__(self, sync_queue:Queue):
         super().__init__()
@@ -135,28 +130,20 @@ class MainWindow(QtWidgets.QMainWindow):
         # 如果单元格对象为空
         if Item is None:
             return
-        row = Item.row()  # 获取行数
-        packet = self.item_list[row][1]
+        row = Item.row()
+        packet = self.dynamic_table.get_packet(row)
         self.set_data(packet)
-        self.set_raw_data(packet)
+        raw_byets = self.item_list[row][2]
+        self.set_raw_data(raw_byets)
 
     
-# def main():
-#     app = QtWidgets.QApplication(sys.argv)
-#     Form = QtWidgets.QWidget()
-#     ui = Ui_Form()
-#     ui.setupUi(Form)
-#     # Maximize the form
-#     Form.showMaximized()
-    
-#     sys.exit(app.exec_())
 
 
 if __name__ == "__main__":
     dev = select_device()  # 选择设备
     item_queue = Queue()  # 创建进程间通信的队列
     message = Queue()
-    p = Process(target=data_process, args=(item_queue, message, dev, ""))
+    p = Process(target=data_process, args=(item_queue, message, dev, "udp"))
     # p.daemon = True
     p.start()
 

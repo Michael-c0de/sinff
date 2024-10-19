@@ -23,3 +23,12 @@ def hexdump_bytes(data):
         ascii_part = ''.join(chr(byte) if 32 <= byte <= 126 else '.' for byte in chunk)
         result.append(f"{i:08x}  {hex_part:<47}  {ascii_part}")
     return '\n'.join(result)
+
+
+def packet2dict(packet):
+    display = {}
+    p = packet
+    while p:
+        display[p.name] = p.fields
+        p = p.payload
+    return display

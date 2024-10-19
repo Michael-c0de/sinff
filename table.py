@@ -8,6 +8,9 @@ from PyQt5.QtWidgets import QHeaderView
 from PyQt5.QtGui import QDesktopServices
 import time
 import os
+from scapy.all import Ether, Packet
+from util import packet2dict
+from filter_util import parse_exp
 logger.setLevel(logging.DEBUG)
 
 class MyTableModel(QAbstractTableModel):
@@ -15,12 +18,11 @@ class MyTableModel(QAbstractTableModel):
         super().__init__()
         self._data = data
         self._headers = headers
-
     def data(self, index, role=Qt.DisplayRole):
         if role == Qt.DisplayRole:
             return str(self._data[index.row()][index.column()])
         return QVariant()
-
+    
     def rowCount(self, index):
         return len(self._data)
 
@@ -31,7 +33,8 @@ class MyTableModel(QAbstractTableModel):
         if role == Qt.DisplayRole and orientation == Qt.Horizontal:
             return self._headers[section]
         return None
-
+    
+    
     def addRows(self, new_rows):
         """向模型中添加多行新数据"""
         start_row = self.rowCount(self.index(0, 0))  
@@ -40,8 +43,9 @@ class MyTableModel(QAbstractTableModel):
 
 
         # 将字典转换为列表，每个字典项按顺序转换为列表的一行
-        for ts, packet in new_rows:
+        for  count, ts, packet in new_rows:
             row_data = [
+                count,
                 ts,
                 packet.src if hasattr(packet, "src") else None,
                 packet.dst if hasattr(packet, "dst") else None,
@@ -55,9 +59,9 @@ class MyTableModel(QAbstractTableModel):
 
 
 class DynamicTable(QWidget):
-    def __init__(self, item_list:list, table_model:MyTableModel):
+    def __init__(self, arrive_list:list, table_model:MyTableModel):
         super().__init__()
-        self.item_list = item_list  # 已经分析的数据包信息
+        self.arrive_list = arrive_list  # 已经分析的数据包信息
         self.model = table_model
         # 已经渲染了self.offset个数据包
         self.offset = 0
@@ -79,17 +83,51 @@ class DynamicTable(QWidget):
         self.update_timer.setInterval(1000)  # 每1秒更新一次表格
         self.update_timer.timeout.connect(self.update_table)
         self.update_timer.start()
+        self.cache = {}
+        self.filter_exp = None
+        self.batch_size = 500
+    def filter(self, packet:Packet):
+        if self.filter_exp is None or self.filter_exp=='':
+            return True
+        frame = packet2dict(packet)
+        return parse_exp(frame, self.filter_exp)
+    
+
+    def get_packet(self, offset):
+        if offset not in self.cache:
+            self.cache[offset] = Ether(self.arrive_list[offset][2])
+        return self.cache[offset]
+
+    def filter_wrap(self, item):
+        return self.filter(item[2])
+    
+    def convert_helper(self, x):
+        i ,j, _ = x
+        return i, j, self.get_packet(i - 1)
+    
+
+    def update_batch(self, items):
+        self.table_view.setUpdatesEnabled(False)
+        # arrive_list格式为id，ts，raw_bytes
+        items_converted = map(self.convert_helper, items)
+        items_filtered = filter(self.filter_wrap, items_converted)
+        self.model.addRows(list(items_filtered))  # 更新模型
+        self.table_view.setUpdatesEnabled(True)
 
     def update_table(self):
         """定期检查数据队列并更新表格"""
-        new_offset = len(self.item_list)
+        new_offset = len(self.arrive_list)
         if new_offset > self.offset:
-            self.table_view.setUpdatesEnabled(False)
-            self.model.addRows(self.item_list[self.offset:])  # 更新模型
-            self.table_view.setUpdatesEnabled(True)
+            batch=[]
+            for item in self.arrive_list[self.offset:]:
+                batch.append(item)
+                if len(batch)==self.batch_size:
+                    self.update_batch(batch)
+            if batch:
+                self.update_batch(batch)
             logger.debug(f"update {new_offset - self.offset} packets end")
             self.offset = new_offset
-            # self.table_view.scrollToBottom()  # 滚动到表格底部
+            self.table_view.scrollToBottom()  # 滚动到表格底部
 
 
 

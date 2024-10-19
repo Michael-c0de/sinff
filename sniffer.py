@@ -27,7 +27,6 @@ class PacketCaptureThread(threading.Thread):
     def run(self):
         logger.info(f"PacketCapture Thread#{threading.get_ident()} run")
         """线程运行函数"""
-
         PCAP_HANDLER = ct.CFUNCTYPE(None, ct.POINTER(ct.c_ubyte), ct.POINTER(pcap.pkthdr), ct.POINTER(ct.c_ubyte))
 
         start_time = time.time()
@@ -45,33 +44,12 @@ class PacketCaptureThread(threading.Thread):
     def packet_handler(self, _,  _pkthdr, _packet):
         """
         处理抓到的包，放入队列
-        _pkthdr:ct.POINTER(pcap.pkthdr)
-        _packet:ct.POINTER(ct.c_ubyte)
         """
-        
-        # ct.POINTER(pkthdr), ct.POINTER(ct.c_ubyte)
-        # print("hint")
         caplen = _pkthdr.contents.caplen
-        # print(caplen)
         pkthdr = copy_pkthdr_pointer(_pkthdr)
         packet = copy_packet_pointer(_packet, caplen)
-        # logger.info(f"#{self.count}, {caplen}")
         self.count+=1
-        # pcap.dump(self.out_pcap, pkthdr, packet)
-        # pcap.dump_flush(args)
-        # self.packet_queue()
-        
-        # packet = bytes(_packet[:])
-        
-        # _ts = pkthdr.contents.ts
-        # ts = _ts.tv_sec + (_ts.tv_usec/1000000)
-        # if self.ts0 == None:
-        #     self.ts0 = ts
-        # ts = ts - self.ts0
-        # if len(self.packet_queue) < self.packet_queue.maxlen:
         self.packet_queue.put((pkthdr, packet))  # 将原始数据包放入队列
-        # logger.debug(f"PacketCapture {pkthdr[0].caplen}")
-
     def stop(self):
         pcap.breakloop(self.handle)
 
@@ -91,6 +69,7 @@ class PacketAnalysisThread(threading.Thread):
         self.out_dt = pcap_out_dt
         self.out_ub = ct.cast(self.out_dt, ct.POINTER(ct.c_ubyte))
         self.ts = None
+        self.count =  1
         self.setDaemon(True)
         
     def run(self):
@@ -98,14 +77,9 @@ class PacketAnalysisThread(threading.Thread):
         """线程运行函数，处理数据包并进行分析"""
         while True:
             try:
-                pkthdr, packet = self.packet_queue.get()
+                pkthdr, packet = self.packet_queue.get()                
                 if(pkthdr=="end"):
-                    print("a"*1000)
                     break
-                # 解析数据包
-                # logger.debug(f"PacketAnalysis {pkthdr[0].caplen}")
-                # print(pkthdr[0].caplen)
-                frame = Ether(bytes(packet[:pkthdr[0].caplen]))
                 # 记录到磁盘
                 pcap.dump(self.out_ub, pkthdr, packet)
                 # 计算时间戳
@@ -113,19 +87,18 @@ class PacketAnalysisThread(threading.Thread):
                 if self.ts is None:
                     self.ts = pk_ts
                 pk_ts -= self.ts
-                self.frame_items.put((pk_ts, frame))
+                frame = bytes(packet[:pkthdr[0].caplen])
+                # 编号，时间戳，bytes字节序
+                self.frame_items.put((self.count, pk_ts, frame))
+                self.count += 1
             except Exception as e:
+                #丢弃非以太包
                 logger.warning(e)
                 continue
-        self.stop()
-        # logger.info(f"PacketAnalysis Thread#{threading.get_ident()} end")
+        logger.info(f"PacketAnalysis Thread#{threading.get_ident()} end")
         
 
-    def stop(self):
-        """停止分析"""
-        
-        pcap.dump_flush(self.out_dt)
-        pcap.dump_close(self.out_dt)
+
         
 
 
@@ -170,23 +143,17 @@ class PacketDataView():
         self._analysis_thread.start()
 
     def close_capture(self):
-        self._capture_thread.stop()        
-        # 数据分析线程不必阻塞
-        # self._analysis_thread.stop()
+        # 停止抓包
+        self._capture_thread.stop()
+        # 向队列中发送end
         self._capture_thread.join()
+        # 等待end到达数据分析线程
         self._analysis_thread.join()
+        # 关闭打开的句柄
+        pcap.dump_flush(self.out_dt)
+        pcap.dump_close(self.out_dt)
         pcap.close(self.handle)
 
-
-    def get_new_list(self):
-        data = self.table_items[self.last_index:]
-        self.last_index = len(self.table_items)
-        logger.debug(f"Show #{len(data)} frame items")
-        return data
-    
-    def get_table_item(self, index):
-        return self.table_items[index]
-    
 
 
 
@@ -204,20 +171,19 @@ def select_device():
 
 def main():
     dev = select_device()
-    data_view = PacketDataView(dev, "")
+    item_queue = Queue()
+    data_view = PacketDataView(dev, Queue(), "")
     # 创建抓包线程和数据分析线程
-
+    data_view.start_capture()
+    # 启动应用
     while(1):
-        data_view.start_capture()
-        # 启动应用
-        while(1):
-            for item in data_view.get_new_list():
-                # print(f"{item}")
-                if data_view.last_index>100:
-                    break
-            if data_view.last_index>100:
-                break
-        data_view.close_capture()
+        item = item_queue.get()
+        print(f"{item}")
+            #     if data_view.last_index>100:
+            #         break
+            # if data_view.last_index>100:
+            #     break
+
 
 if __name__ == "__main__":
     main()
